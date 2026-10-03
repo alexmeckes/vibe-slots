@@ -6,7 +6,9 @@ In the terminal it's drawn as full-color pixel art (half-block pixels on a `Rast
 
 ![Frames of the pixel scene: spinning, locking, the chest bursting and the reveal](docs/preview.png)
 
-- Clawd, the Claude Code mascot, works the machine: blinks while it spins, ducks to pull the lever, hops while the box rattles, cheers at the explosion, and dances for a jackpot (or just blinks at a common prize).
+- Clawd, the Claude Code mascot, has a whole range: taps a foot and glances at the reels while waiting, hops for every coin (tool call), hauls the lever, flinches as each reel lands, flails while the box rattles, leans back in awe as it cracks, and celebrates by rarity (a victory dance for legendary, a wave for rare and epic, an unimpressed shrug for common, a tear for TILT). Drawn procedurally in `hooks/clawd.ts` with shading, squash and stretch, and a shadow.
+
+![Clawd's expressions](docs/clawd.png)
 - Rarity: common 60%, rare 25%, epic 12%, legendary 3% (each coin adds +0.5% to legendary, capped at 10%).
 - The payline matches the tier: 7-7-7 is legendary, a triple is epic, a pair is rare.
 - Your stash of prizes is kept across sessions (`$.store`).
@@ -20,6 +22,6 @@ git clone https://github.com/alexmeckes/vibe-slots
 claude --plugin-dir ./vibe-slots
 ```
 
-Files: `hooks/pixels.ts` (the pixel scene), `hooks/motion.ts` (timing and reel physics), `hooks/art.ts` (loot tables and the text-art fallback), `hooks/register.tsx` (hooks and ticker), `types/index.d.ts` (state contract), `tests/slots.test.tsx`.
+Files: `hooks/pixels.ts` (the pixel scene), `hooks/clawd.ts` (Clawd), `hooks/motion.ts` (timing and reel physics), `hooks/art.ts` (loot tables and the text-art fallback), `hooks/register.tsx` (hooks and ticker), `types/index.d.ts` (state contract), `tests/slots.test.tsx`.
 
 Check: `claude plugin validate .` and `claude plugin test .`

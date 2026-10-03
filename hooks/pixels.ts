@@ -2,6 +2,8 @@
 // two stacked pixels (a half block), so a 64 x 7 cell canvas is 64 x 14 pixels.
 // Text cells can be laid over the pixels for labels.
 import type { Show, Tier } from '../types'
+import { drawClawd } from './clawd'
+import type { Look } from './clawd'
 import { SLOT_PX, STRIP_PX, lockFrames, mod, reelMotion, stopFrame } from './motion'
 
 export const SCENE_COLUMNS = 64
@@ -198,31 +200,6 @@ const SYMBOL_SPRITES: readonly { rows: readonly string[]; ink: Record<string, nu
   },
 ]
 
-type Pose = 'idle' | 'blink' | 'cheer' | 'reach' | 'squat'
-
-// Clawd as on the Claude Code welcome screen: a wide body, two slit eyes, side
-// arms and four short legs, 18 x 8 pixels.
-const CLAWD_ROWS: Record<Pose, readonly string[]> = {
-  idle: ['...KKKKKKKKKKKK...', '...KKKKKKKKKKKK...', '...KKeKKKKKKeKK...', '...KKeKKKKKKeKK...', '.KKKKKKKKKKKKKKKK.', '...KKKKKKKKKKKK...', '....k.k....k.k....', '....k.k....k.k....'],
-  blink: ['...KKKKKKKKKKKK...', '...KKKKKKKKKKKK...', '...KKKKKKKKKKKK...', '...KKeKKKKKKeKK...', '.KKKKKKKKKKKKKKKK.', '...KKKKKKKKKKKK...', '....k.k....k.k....', '....k.k....k.k....'],
-  cheer: [
-    '.K.KKKKKKKKKKKK.K.',
-    '.K.KKKKKKKKKKKK.K.',
-    '..KKKeKKKKKKeKKK..',
-    '...KKeKKKKKKeKK...',
-    '...KKKKKKKKKKKK...',
-    '...KKKKKKKKKKKK...',
-    '....k.k....k.k....',
-    '....k.k....k.k....',
-  ],
-  reach: ['...KKKKKKKKKKKK...', '...KKKKKKKKKKKK...', '...KeKKKKKKeKKK...', '...KeKKKKKKeKKK...', '...KKKKKKKKKKKKKK.', '...KKKKKKKKKKKK...', '....k.k....k.k....', '....k.k....k.k....'],
-  squat: ['..................', '...KKKKKKKKKKKK...', '...KKeKKKKKKeKK...', '...KKeKKKKKKeKK...', '.KKKKKKKKKKKKKKKK.', '...KKKKKKKKKKKK...', '...KKKKKKKKKKKK...', '...kk.k....k.kk...'],
-}
-
-function drawClawd(cv: Canvas, x: number, y: number, pose: Pose, map?: (c: number) => number): void {
-  cv.sprite(x, y, CLAWD_ROWS[pose], { K: INK.clawd, k: INK.clawdShade, e: INK.eye }, map)
-}
-
 const CHEST = [
   '.ddddddddddddd.',
   'dWWWWWWWWWWWWWd',
@@ -256,7 +233,7 @@ const WINDOWS = [4, 15, 26]
 const WIN_W = 9
 const PAY_Y = WIN_Y + Math.floor(WIN_H / 2)
 const CLAWD_X = 43
-const CLAWD_Y = 6
+const GROUND = 12
 
 /** The lever's pull, 0 up to 1 fully down, over the first frames of a spin. */
 function leverPull(show: Show): number {
@@ -352,23 +329,41 @@ function drawCabinet(cv: Canvas, show: Show, dim: (c: number) => number = c => c
 
 function spinScene(cv: Canvas, show: Show): void {
   drawCabinet(cv, show)
+  clawd(cv, spinLook(show))
+}
+
+function clawd(cv: Canvas, look: Look): void {
+  drawClawd(cv, CLAWD_X, GROUND, look)
+}
+
+/** Clawd at the machine: hauls the lever, taps a foot while waiting, cheers each coin. */
+function spinLook(show: Show): Look {
   const f = show.frame
   const pull = leverPull(show)
   if (pull > 0) {
-    // Clawd reaches over and hauls the lever down.
     const knobY = Math.round(1 + pull * 8)
-    const y = CLAWD_Y
-    drawClawd(cv, CLAWD_X, y, 'reach')
-    for (let x = 41; x < CLAWD_X + 3; x++) cv.set(x, Math.min(knobY + 1, y + 4), INK.clawd)
-  } else if (show.phase === 'locking') {
-    // Watches the reels, bouncing as each one lands.
-    const bounce = [0, 1, 2].some(i => show.frame - stopFrame(show, i) === 0)
-    drawClawd(cv, CLAWD_X, CLAWD_Y + (bounce ? -1 : 0), bounce ? 'squat' : 'idle')
-  } else {
-    const blink = f % 28 < 2
-    const bob = f % 12 < 6 ? 0 : 1
-    drawClawd(cv, CLAWD_X, CLAWD_Y - bob, blink ? 'blink' : 'idle')
+    return { eyes: 'open', gaze: -1, arms: 'reach', reach: { x: 41, y: knobY + 1 }, squash: pull > 0.5 ? 1 : 0, frame: f }
   }
+  if (show.phase === 'locking') {
+    const end = lockFrames(show)
+    if (f >= end - 6) {
+      const won = show.loot !== null && show.loot.tier !== 'common'
+      return won
+        ? { eyes: 'happy', arms: 'up', blush: true, lift: f % 4 < 2 ? 1 : 0, frame: f }
+        : { eyes: 'half', arms: 'down', gaze: -1, frame: f }
+    }
+    const landed = [0, 1, 2].some(i => f - stopFrame(show, i) === 0)
+    return { eyes: 'wide', gaze: -1, arms: 'down', squash: landed ? 1 : 0, frame: f }
+  }
+  // A coin just went in: a little hop of joy.
+  const since = f - show.coinFrame
+  if (show.coins > 0 && since >= 0 && since < 3) {
+    return { eyes: 'happy', arms: 'up', lift: since === 1 ? 2 : 1, frame: f }
+  }
+  // Waiting on the model: glances at the reels, blinks, taps a foot.
+  const blink = f % 31 < 2
+  const glance = f % 45 >= 30 ? -1 : 0
+  return { eyes: blink ? 'blink' : 'open', gaze: glance, arms: 'down', tap: f % 8 < 4 ? 3 : undefined, frame: f }
 }
 
 const BOX_X = 17
@@ -427,7 +422,7 @@ function boomScene(cv: Canvas, show: Show): void {
   if (f === 15) {
     // One frame of flash as the box bursts.
     cv.rect(0, 0, W, H, g.light)
-    drawClawd(cv, CLAWD_X, CLAWD_Y, 'cheer', c => mix(c, g.light, 0.5))
+    clawd(cv, { eyes: 'happy', arms: 'up', squash: -1, frame: f, map: c => mix(c, g.light, 0.55) })
     return
   }
   if (f < 5) {
@@ -436,7 +431,8 @@ function boomScene(cv: Canvas, show: Show): void {
       // Dust where it lands.
       for (const dx of [-2, -1, 15, 16]) cv.set(BOX_X + dx, H - 1, INK.textDim)
     }
-    drawClawd(cv, CLAWD_X, CLAWD_Y, f >= 3 ? 'squat' : 'idle')
+    // Startled by the box landing.
+    clawd(cv, f >= 3 ? { eyes: 'wide', gaze: -1, arms: 'up', squash: f === 3 ? 2 : 1, frame: f } : { eyes: 'wide', gaze: -1, arms: 'down', frame: f })
     return
   }
   if (f < 13) {
@@ -444,7 +440,9 @@ function boomScene(cv: Canvas, show: Show): void {
     const t = (f - 5) / 8
     cv.sprite(BOX_X + JITTER[f - 5]!, BOX_Y, CHEST, chestInk(t, tier))
     sparkles(cv, f, tier, BOX_X - 4, BOX_Y - 4, 23, 12, Math.round(t * 10))
-    drawClawd(cv, CLAWD_X, CLAWD_Y + (f % 2 === 0 ? -2 : 0), f % 2 === 0 ? 'cheer' : 'squat')
+    // Can't keep still: hops on the spot, arms going.
+    const air = f % 2 === 0
+    clawd(cv, { eyes: 'wide', gaze: -1, arms: 'flail', lift: air ? 2 : 0, squash: air ? -1 : 1, frame: f })
     return
   }
   if (f < 15) {
@@ -466,7 +464,8 @@ function boomScene(cv: Canvas, show: Show): void {
     }
     cv.rect(BOX_X + 1, oy, 13, lift, g.light)
     cv.sprite(BOX_X, BOX_Y - lift, lid, chestInk(1, tier))
-    drawClawd(cv, CLAWD_X, CLAWD_Y, 'blink')
+    // Leans back in awe as the light comes out.
+    clawd(cv, { eyes: 'wide', gaze: -1, arms: 'up', squash: -1, frame: f })
     return
   }
   // The burst: the open chest, a gem rising out of it, and particles under gravity.
@@ -476,7 +475,10 @@ function boomScene(cv: Canvas, show: Show): void {
   const rise = Math.min(1, t / 7)
   const gemY = Math.round(BOX_Y + 1 - rise * 6)
   drawGem(cv, centerX - 5, gemY, tier, f)
-  drawClawd(cv, CLAWD_X, CLAWD_Y + (f % 4 < 2 ? -2 : 0), 'cheer')
+  const HOPS = [0, 2, 3, 2, 0, 0]
+  const k = t % HOPS.length
+  const lift = HOPS[k]!
+  clawd(cv, { eyes: 'happy', arms: 'flail', blush: true, lift, squash: lift > 0 ? -1 : k === 4 ? 1 : 0, frame: f })
 }
 
 function openChest(cv: Canvas, tier: Tier): void {
@@ -504,9 +506,7 @@ function revealScene(cv: Canvas, show: Show): void {
   drawGem(cv, BOX_X + 2, BOX_Y - 5 + (alive && f % 10 < 5 ? 0 : 1), tier, alive ? f : 0)
   if (alive) sparkles(cv, f, tier, BOX_X - 4, 0, 23, 12, tier === 'legendary' ? 14 : tier === 'epic' ? 10 : 6)
   // Clawd's reaction scales with the prize.
-  const pose: Pose = tier === 'common' ? (f % 30 < 2 ? 'blink' : 'idle') : 'cheer'
-  const hop = alive && tier === 'legendary' && f % 6 < 3 ? -2 : 0
-  drawClawd(cv, CLAWD_X, CLAWD_Y + hop, pose)
+  clawd(cv, revealLook(tier, f, alive))
   // The rarity plate, left of the chest.
   const name = ` ${tier.toUpperCase()} `
   const plateW = 13
@@ -517,10 +517,28 @@ function revealScene(cv: Canvas, show: Show): void {
   for (let i = 0; i < stars; i++) cv.text(1 + Math.floor(plateW / 2) - (stars - 1) + i * 2, 4, '✦', twinkle(i))
 }
 
+function revealLook(tier: Tier, f: number, alive: boolean): Look {
+  if (tier === 'common') {
+    // Unimpressed: half-lidded, with the odd shrug.
+    const shrug = alive && f % 20 >= 10 && f % 20 < 13
+    return { eyes: f % 26 < 2 ? 'blink' : 'half', arms: shrug ? 'up' : 'down', frame: f }
+  }
+  if (tier === 'legendary') {
+    // A victory dance: big hops with a squash on every landing.
+    const HOPS = [0, 2, 3, 2, 0, 0]
+    const k = f % HOPS.length
+    const lift = alive ? HOPS[k]! : 0
+    return { eyes: 'happy', arms: alive ? 'flail' : 'up', blush: true, lift, squash: !alive ? 0 : lift > 0 ? -1 : k === 4 ? 1 : 0, frame: f }
+  }
+  // Rare and epic: a happy wave, and a hop now and then.
+  const lift = alive && f % 12 === 1 ? 2 : alive && (f % 12 === 0 || f % 12 === 2) ? 1 : 0
+  return { eyes: 'happy', arms: alive ? 'wave' : 'up', blush: tier === 'epic', lift, frame: f }
+}
+
 function tiltScene(cv: Canvas, show: Show): void {
   drawCabinet(cv, show, grey)
   cv.text(CAB_X + Math.floor((CAB_W - 11) / 2), 3, '  T I L T  ', 0xffffff, INK.tilt)
-  drawClawd(cv, CLAWD_X, CLAWD_Y, 'blink', grey)
+  clawd(cv, { eyes: 'sad', arms: 'down', squash: 1, frame: show.frame })
 }
 
 /** The scene for a frame on a canvas. */
