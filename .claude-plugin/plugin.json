@@ -1,0 +1,9 @@
+{
+  "name": "vibe-slots",
+  "version": "0.1.0",
+  "description": "Vibe coding as a slot machine: reels spin above the prompt while Claude works, and every finished turn cracks open a loot box.",
+  "author": {
+    "name": "Alex"
+  },
+  "types": "./types/index.d.ts"
+}
