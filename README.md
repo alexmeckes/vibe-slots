@@ -9,7 +9,12 @@ Vibe coding as a slot machine. While Claude works, a slot cabinet spins in the b
 - An interrupted turn shows TILT. Short or narrow terminals get a one-line version.
 - The prize clears itself after 20 seconds or on your next prompt.
 
-Try it: `claude --plugin-dir /path/to/vibe-slots`
+Try it:
+
+```
+git clone https://github.com/alexmeckes/vibe-slots
+claude --plugin-dir ./vibe-slots
+```
 
 Files: `hooks/art.ts` (all frames and loot tables, pure functions), `hooks/register.tsx` (hooks and ticker), `types/index.d.ts` (state contract), `tests/slots.test.tsx`.
 
