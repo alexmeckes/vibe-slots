@@ -2,8 +2,10 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Show, Stash } from '../types'
-import { EMPTY_STASH, FRAME_MS, IDLE, bandRows, rollLoot, step, stopsFor } from './art'
+import { EMPTY_STASH, IDLE, bandRows, captionRow, rollLoot, step, stopsFor } from './art'
 import type { Seg } from './art'
+import { FRAME_MS } from './motion'
+import { SCENE_COLUMNS, SCENE_ROWS, sceneCells } from './pixels'
 
 const show = atom({ plugin: 'vibe-slots', key: 'show' } as const, IDLE)
 const stash = atom({ plugin: 'vibe-slots', key: 'stash' } as const, EMPTY_STASH)
@@ -61,7 +63,7 @@ export const register: Register = on => {
 
   // Every tool call is another coin in the slot.
   on('tool.call', async ($, e, next) => {
-    await update($, show, s => (s.phase === 'spinning' ? { ...s, coins: s.coins + 1 } : s))
+    await update($, show, s => (s.phase === 'spinning' ? { ...s, coins: s.coins + 1, coinFrame: s.frame } : s))
     return next(e)
   })
 
@@ -89,8 +91,10 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const rows = bandRows(await read($, show), await read($, stash), e.props.maxRows, e.props.bodyColumns)
-    if (rows === null) return next(e)
+    const current = await read($, show)
+    if (current.phase === 'idle') return next(e)
+    const owned = await read($, stash)
+    const { maxRows, bodyColumns } = e.props
 
     const { Box, Text } = $.ui.resolve(e)
     const paint = (seg: Seg, i: number) => (
@@ -99,6 +103,21 @@ export const register: Register = on => {
       </Text>
     )
 
+    // The pixel scene where the terminal has room for it; text art everywhere else.
+    if (e.surface === 'terminal' && maxRows >= SCENE_ROWS + 1 && bodyColumns >= SCENE_COLUMNS + 2) {
+      const { Raster } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column">
+          <Raster key="scene" columns={SCENE_COLUMNS} rows={SCENE_ROWS} cells={sceneCells(current)} />
+          <Box key="caption" flexDirection="row">
+            {captionRow(current, owned).map(paint)}
+          </Box>
+        </Box>
+      )
+    }
+
+    const rows = bandRows(current, owned, maxRows, bodyColumns)
+    if (rows === null) return next(e)
     return (
       <Box flexDirection="column">
         {rows.map((row, y) => (

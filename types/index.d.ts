@@ -15,6 +15,8 @@ export type Show = {
   frame: number
   /** Tool calls this turn: each one is a coin in the slot. */
   coins: number
+  /** The frame the last coin went in, for the coin-drop animation. */
+  coinFrame: number
   /** Symbol index each reel stops on, set when locking starts. */
   stops: number[]
   loot: Loot | null

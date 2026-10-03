@@ -1,7 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { RenderPropsOf } from 'claude-code'
 
-import { BOOM_FRAMES, FRAME_MS, LOCK_FRAMES, SYMBOLS, TIERS, bandRows, rollTier, stopsFor } from '../hooks/art'
+import { SYMBOLS, TIERS, bandRows, rollTier, stopsFor } from '../hooks/art'
+import { BOOM_FRAMES, FRAME_MS, lockFrames, reelSymbol } from '../hooks/motion'
+import { SCENE_COLUMNS, SCENE_ROWS, sceneCells } from '../hooks/pixels'
 import { EMPTY_STASH, IDLE } from '../hooks/art'
 import type { Row } from '../hooks/art'
 
@@ -46,7 +48,7 @@ test('every frame fits a 44-column band and the cabinet fits 6 rows', async () =
   const loot = { tier: 'epic' as const, item: 'Zero-Diff Refactor', flavor: 'Everything changed. Nothing changed.' }
   const shows = [
     ...Array.from({ length: 60 }, (_, frame) => ({ ...IDLE, phase: 'spinning' as const, frame, coins: frame })),
-    ...Array.from({ length: LOCK_FRAMES }, (_, frame) => ({ ...IDLE, phase: 'locking' as const, frame, stops: [2, 2, 2], loot })),
+    ...Array.from({ length: 40 }, (_, frame) => ({ ...IDLE, phase: 'locking' as const, frame, stops: [2, 2, 2], loot })),
     ...Array.from({ length: BOOM_FRAMES }, (_, frame) => ({ ...IDLE, phase: 'boom' as const, frame, stops: [2, 2, 2], loot })),
   ]
   for (const show of shows) {
@@ -56,6 +58,30 @@ test('every frame fits a 44-column band and the cabinet fits 6 rows', async () =
   }
   expect(bandRows({ ...IDLE, phase: 'spinning' }, EMPTY_STASH, 3, 100)).toHaveLength(1)
   expect(bandRows(IDLE, EMPTY_STASH, 12, 100)).toBe(null)
+})
+
+test('the reels glide to rest exactly on their stop symbols', async () => {
+  for (const stops of [[0, 0, 0], [3, 3, 3], [1, 5, 6], [6, 2, 4]]) {
+    const show = { ...IDLE, phase: 'locking' as const, frame: 0, stops }
+    const end = { ...show, frame: lockFrames(show) }
+    expect([0, 1, 2].map(i => reelSymbol(end, i))).toEqual(stops)
+    expect(lockFrames(show) <= 40).toBe(true)
+  }
+})
+
+test('every pixel frame encodes to a full raster of cells', async () => {
+  const loot = { tier: 'legendary' as const, item: 'The Golden Semicolon', flavor: 'Compiles on the first try.' }
+  const base = { ...IDLE, coins: 3, stops: [0, 0, 0], loot }
+  const shows = [
+    ...Array.from({ length: 30 }, (_, frame) => ({ ...base, phase: 'spinning' as const, frame })),
+    ...Array.from({ length: 30 }, (_, frame) => ({ ...base, phase: 'locking' as const, frame })),
+    ...Array.from({ length: BOOM_FRAMES }, (_, frame) => ({ ...base, phase: 'boom' as const, frame })),
+    ...Array.from({ length: 45 }, (_, frame) => ({ ...base, phase: 'reveal' as const, frame })),
+    { ...base, phase: 'tilt' as const },
+  ]
+  for (const show of shows) {
+    expect(sceneCells(show).length).toBe((Math.ceil((SCENE_COLUMNS * SCENE_ROWS * 12) / 3) * 4))
+  }
 })
 
 test('a turn spins the reels, then the loot box explodes into a prize', async ($, on) => {
@@ -80,20 +106,30 @@ test('a turn spins the reels, then the loot box explodes into a prize', async ($
   await $.prompt.submit({ text: 'make it pop', wait: false } as never)
   await clock.advance(FRAME_MS * 5)
 
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...BAND(), surface })
+  const term = await $.ui.mount({ ...BAND(), surface: 'terminal' })
+  expect(await term.find({ type: 'Raster', key: 'scene' })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /×/ })).toBeDefined()
+  await term.unmount()
+
+  // Desktop, and a terminal too small for the scene, get the text cabinet.
+  for (const [surface, rows] of [['desktop', 12], ['terminal', 6]] as const) {
+    const ui = await $.ui.mount({ ...BAND(rows), surface })
+    expect(await ui.find({ type: 'Raster' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: '▶' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▜█████▛/ })).toBeDefined()
     await ui.unmount()
   }
 
   await $.turn.complete({ answer: 'done', durationMs: 1000, isAborted: false, turnId: 't1' } as never)
-  await clock.advance(FRAME_MS * (LOCK_FRAMES + BOOM_FRAMES + 3))
+  await clock.advance(FRAME_MS * (40 + BOOM_FRAMES + 3))
 
   const ui = await $.ui.mount({ ...BAND(), surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /COMMON|RARE|EPIC|LEGENDARY/ })).toBeDefined()
+  expect(await ui.find({ type: 'Raster', key: 'scene' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /stash/ })).toBeDefined()
   await ui.unmount()
+  const text = await $.ui.mount({ ...BAND(), surface: 'desktop' })
+  expect(await text.find({ type: 'Text', text: /COMMON|RARE|EPIC|LEGENDARY/ })).toBeDefined()
+  await text.unmount()
 
   // The prize clears itself after a while.
   await clock.advance(30000)
@@ -114,7 +150,10 @@ test('an interrupted turn tilts the machine', async ($, on) => {
 
   await $.prompt.submit({ text: 'go', wait: false } as never)
   await $.turn.complete({ answer: '', durationMs: 10, isAborted: true, turnId: 't2' } as never)
-  const ui = await $.ui.mount({ ...BAND(), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...BAND(), surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /T I L T/ })).toBeDefined()
   await ui.unmount()
+  const term = await $.ui.mount({ ...BAND(), surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /interrupted/ })).toBeDefined()
+  await term.unmount()
 })

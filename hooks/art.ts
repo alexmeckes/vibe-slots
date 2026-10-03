@@ -2,6 +2,7 @@
 // colored text segments, so the hooks module only paints and the tests can
 // check frames without a surface.
 import type { Loot, Show, Stash, Tier } from '../types'
+import { BOOM_FRAMES, REVEAL_FRAMES, lockFrames, stopFrame } from './motion'
 
 export type Seg = { t: string; c?: string; b?: boolean; d?: boolean; i?: boolean }
 export type Row = Seg[]
@@ -70,15 +71,7 @@ export const LOOT: Record<Tier, readonly [string, string][]> = {
 
 export const EMPTY_STASH: Stash = { common: 0, rare: 0, epic: 0, legendary: 0 }
 
-export const IDLE: Show = { phase: 'idle', frame: 0, coins: 0, stops: [], loot: null }
-
-/** Frames each animated phase runs for at the ticker's rate. */
-export const LOCK_FRAMES = 12
-export const BOOM_FRAMES = 15
-export const REVEAL_FRAMES = 24
-export const FRAME_MS = 90
-
-const LOCK_AT = [3, 6, 9]
+export const IDLE: Show = { phase: 'idle', frame: 0, coins: 0, coinFrame: -10, stops: [], loot: null }
 
 export type Rand = () => number
 
@@ -125,8 +118,9 @@ export function stopsFor(rand: Rand, tier: Tier): number[] {
 const mod = (a: number, n: number) => ((a % n) + n) % n
 
 function reelAt(show: Show, reel: number): number | null {
-  if (show.phase === 'locking' && show.frame >= LOCK_AT[reel]!) return show.stops[reel] ?? 0
-  const f = show.phase === 'locking' ? show.frame + 200 : show.frame
+  if (show.phase === 'locking' && show.frame >= stopFrame(show, reel)) return show.stops[reel] ?? 0
+  // The text reels tick at half the pixel scene's rate so the symbols stay readable.
+  const f = Math.floor((show.phase === 'locking' ? show.frame + 200 : show.frame) / 2)
   return mod(f * (reel + 2) + reel * 3, SYMBOLS.length)
 }
 
@@ -239,7 +233,8 @@ const H = 5
 
 /** The loot box: shakes, cracks with light, then explodes in the tier's color. */
 export function boomRows(show: Show): Row[] {
-  const f = show.frame
+  // Drawn at half the pixel scene's frame rate.
+  const f = Math.floor(show.frame / 2)
   const tier = show.loot?.tier ?? 'common'
   const glow = TIER_STYLE[tier].c
   if (f < SHAKE.length) {
@@ -346,7 +341,7 @@ export function compactRow(show: Show): Row {
     return [{ t: `${'★'.repeat(s.stars)} ${show.loot.tier.toUpperCase()} `, c: s.c, b: true }, { t: show.loot.item, c: s.c }]
   }
   if (show.phase === 'tilt') return tiltRows()[0]!
-  if (show.phase === 'boom') return [{ t: '[?] ', c: COLORS.gold, b: true }, { t: show.frame < 9 ? 'rattle rattle' : 'K-BOOM!', b: true }]
+  if (show.phase === 'boom') return [{ t: '[?] ', c: COLORS.gold, b: true }, { t: show.frame < 18 ? 'rattle rattle' : 'K-BOOM!', b: true }]
   const reels = [0, 1, 2].map(i => SYMBOLS[reelAt(show, i)!]!)
   return [
     { t: '[', c: COLORS.gray },
@@ -381,7 +376,7 @@ export function step(show: Show): { next: Show; done: boolean } {
     case 'spinning':
       return { next: { ...show, frame }, done: false }
     case 'locking':
-      return frame >= LOCK_FRAMES
+      return frame >= lockFrames(show)
         ? { next: { ...show, phase: 'boom', frame: 0 }, done: false }
         : { next: { ...show, frame }, done: false }
     case 'boom':
@@ -392,5 +387,45 @@ export function step(show: Show): { next: Show; done: boolean } {
       return { next: { ...show, frame }, done: frame >= REVEAL_FRAMES }
     default:
       return { next: show, done: true }
+  }
+}
+
+const RATTLES = ['*rattle*', '*rattle rattle*', '*RATTLE RATTLE*']
+
+/** The one line of text under the pixel scene. */
+export function captionRow(show: Show, stash: Stash): Row {
+  const f = show.frame
+  switch (show.phase) {
+    case 'spinning':
+      return [
+        { t: '  ' },
+        coinTrail(show.coins),
+        { t: ` ×${show.coins}   `, c: COLORS.gold },
+        { t: SPIN_QUIPS[Math.floor(f / 40) % SPIN_QUIPS.length]!, d: true },
+        { t: '.'.repeat(1 + (Math.floor(f / 4) % 3)), d: true },
+      ]
+    case 'locking':
+      return [{ t: '  STOPPING', c: COLORS.yellow, b: true }, { t: '.'.repeat(1 + (Math.floor(f / 4) % 3)), c: COLORS.yellow }]
+    case 'boom': {
+      const glow = TIER_STYLE[show.loot?.tier ?? 'common'].c
+      if (f < 5) return [{ t: '  incoming!', d: true }]
+      if (f < 15) return [{ t: '  ' + RATTLES[Math.min(2, Math.floor((f - 5) / 3))]!, d: true }]
+      return [{ t: '  K-BOOM!', c: glow, b: true }]
+    }
+    case 'reveal': {
+      if (!show.loot) return []
+      const style = TIER_STYLE[show.loot.tier]
+      return [
+        { t: '  ' },
+        { t: show.loot.item, c: style.c, b: true },
+        { t: `  "${show.loot.flavor}"`, i: true, d: true },
+        { t: '   stash ', d: true },
+        ...TIERS.flatMap((tier, i) => [{ t: String(stash[tier]), c: TIER_STYLE[tier].c, b: true }, { t: i < 3 ? '·' : '', d: true }]),
+      ]
+    }
+    case 'tilt':
+      return [{ t: '  turn interrupted, the house keeps your coins', d: true }]
+    default:
+      return []
   }
 }

@@ -2,6 +2,10 @@
 
 Vibe coding as a slot machine. While Claude works, a slot cabinet spins in the band above the prompt; every tool call drops another coin in. When the turn ends the reels lock one by one, a loot box rattles, glows its rarity color, cracks and explodes, and you get a prize.
 
+In the terminal it's drawn as full-color pixel art (half-block pixels on a `Raster`): a lit marquee with chasing bulbs, reels with cylinder shading and motion blur that glide to a stop with a little overshoot, a lever Clawd actually pulls, a treasure chest that drops in, shakes, cracks with light rays, flashes and bursts into particles under gravity, and a gem that rises out of it. Desktop, and terminals with fewer than 8 free rows or 66 columns, get the text-art version.
+
+![Frames of the pixel scene: spinning, locking, the chest bursting and the reveal](docs/preview.png)
+
 - Clawd, the Claude Code mascot, works the machine: blinks while it spins, ducks to pull the lever, hops while the box rattles, cheers at the explosion, and dances for a jackpot (or just blinks at a common prize).
 - Rarity: common 60%, rare 25%, epic 12%, legendary 3% (each coin adds +0.5% to legendary, capped at 10%).
 - The payline matches the tier: 7-7-7 is legendary, a triple is epic, a pair is rare.
@@ -16,6 +20,6 @@ git clone https://github.com/alexmeckes/vibe-slots
 claude --plugin-dir ./vibe-slots
 ```
 
-Files: `hooks/art.ts` (all frames and loot tables, pure functions), `hooks/register.tsx` (hooks and ticker), `types/index.d.ts` (state contract), `tests/slots.test.tsx`.
+Files: `hooks/pixels.ts` (the pixel scene), `hooks/motion.ts` (timing and reel physics), `hooks/art.ts` (loot tables and the text-art fallback), `hooks/register.tsx` (hooks and ticker), `types/index.d.ts` (state contract), `tests/slots.test.tsx`.
 
 Check: `claude plugin validate .` and `claude plugin test .`
